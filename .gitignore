@@ -1,2 +1,8 @@
 *.~undo-tree~
-__pycache__
+__pycache__/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+build/
+dist/
+figures/

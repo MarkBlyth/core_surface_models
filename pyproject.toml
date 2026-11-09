@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "coresurf"
+version = "0.1.0"
+description = "Accurate two-state core-surface thermal models for battery cells"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Mark Blyth" }]
+dependencies = ["numpy", "scipy"]
+
+[project.optional-dependencies]
+reference = ["pybamm"]
+ecm = ["pandas"]
+paper = ["pybamm", "pandas", "matplotlib"]
+dev = ["pytest", "pybamm", "pandas"]
+
+[project.urls]
+Repository = "https://github.com/MarkBlyth/core_surface_models"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
