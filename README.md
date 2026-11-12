@@ -92,6 +92,28 @@ See the [guide](docs/guide.md) for details and worked examples. The code
 listing in the paper (`build_eigenmode_steadystatemode_model`,
 `get_model_matrices`) also works.
 
+### Adding temperatures to your own model
+
+`A` and `b` take one line to generate, and the thermal model is two
+linear ODEs, so it can be appended to any ODE system you already have:
+
+```python
+A, b = coresurf.eigenmode_steadystate_model(params).get_model_matrices()
+
+def rhs(t, x):
+    soc, T = x[0], x[1:]                        # your states, then [T_mean, T_0]
+    dynamics = -current / capacity              # your model's equations
+    return np.r_[dynamics, A @ (T - T_inf) + b * q(t)]
+
+soln = solve_ivp(rhs, [0, 1500], [1.0, T_inf, T_inf])
+```
+
+[examples/00_minimal_example.py](examples/00_minimal_example.py) is this
+recipe as a runnable script.
+[examples/08_parallel_cells.py](examples/08_parallel_cells.py) applies it
+to a module of parallel cells with uneven cooling, with one thermal model
+per cell and temperature-dependent current sharing.
+
 ### Coupling with an electrical model
 
 [examples/07_electrothermal_ecm.py](examples/07_electrothermal_ecm.py)

@@ -427,6 +427,7 @@ print(soln["T_core"][-1], soln["T_surf"][-1], soln["T_mean"][-1])
 
 | Script | What it shows |
 |---|---|
+| [00_minimal_example.py](../examples/00_minimal_example.py) | The minimal recipe: get `A` and `b`, append them to your own ODE right-hand side, solve with `solve_ivp` |
 | [01_first_simulation.py](../examples/01_first_simulation.py) | The basics: one cell, constant heating, core/surface/average temperature, temperature profile |
 | [02_your_own_cell.py](../examples/02_your_own_cell.py) | Entering your own properties, `describe()`, comparing all the models |
 | [03_time_varying_heating.py](../examples/03_time_varying_heating.py) | Heating from a drive-cycle current profile loaded from a CSV file |
@@ -434,6 +435,7 @@ print(soln["T_core"][-1], soln["T_surf"][-1], soln["T_mean"][-1])
 | [05_using_the_matrices.py](../examples/05_using_the_matrices.py) | Getting `A` and `b`, what they tell you, solving the equations with a standard ODE solver |
 | [06_check_against_full_model.py](../examples/06_check_against_full_model.py) | Checking against a detailed simulation (needs PyBaMM) |
 | [07_electrothermal_ecm.py](../examples/07_electrothermal_ecm.py) | Coupling the thermal model with an equivalent-circuit electrical model, so that heat generation and temperature affect each other (needs pandas) |
+| [08_parallel_cells.py](../examples/08_parallel_cells.py) | A module of parallel cells with uneven cooling: one thermal model per cell, stacked into one system, with temperature-dependent current sharing |
 
 ---
 
@@ -585,6 +587,36 @@ these models side by side: `model.core` (for `T_core`) and
 ```python
 f = model.rhs(heat, T_ambient=25)  # f(t, x) for any solver
 ```
+
+### Adding temperatures to your own model
+
+If you already have a model written as ODEs (an electrical model, a pack
+or vehicle model, ...), get `A` and `b`, append the two thermal
+equations to your right-hand side, and solve as usual. `q(t)` is the
+heat your model generates, in W/m³:
+
+```python
+A, b = coresurf.eigenmode_steadystate_model(params).get_model_matrices()
+
+def rhs(t, x):
+    soc, T = x[0], x[1:]                        # your states, then [T_mean, T_0]
+    dynamics = -current / capacity              # your model's equations
+    return np.r_[dynamics, A @ (T - T_inf) + b * q(t)]
+
+soln = solve_ivp(rhs, [0, 1500], [1.0, T_inf, T_inf])
+```
+
+That's the whole recipe; [Example 0](../examples/00_minimal_example.py)
+is exactly this, as a runnable script. Note `@` (matrix multiplication),
+not `*`. With equal cooling on both faces, take the matrices from
+`coresurf.symmetric_core_surface_model(params).core` instead, to get the
+states `[T_mean, T_core]`.
+
+For several cells, give each its own `A` and `b` and stack them with
+`scipy.linalg.block_diag`. Because the temperatures are now states, your
+model can also use them, for example for temperature-dependent
+resistance. [Example 8](../examples/08_parallel_cells.py) does both, for
+a module of parallel cells with uneven cooling.
 
 ### Coupling with an electrical model
 
