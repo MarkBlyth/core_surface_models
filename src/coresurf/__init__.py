@@ -10,13 +10,16 @@ Quick start::
     model = coresurf.symmetric_core_surface_model(params)
     t = np.linspace(0, 600, 200)
     soln = model.simulate(heatgen=3.5e5, t_eval=t)  # W/m3
-    soln["T_core"], soln["T_surf"]
+    soln["T_core"], soln["T_surf"], soln["T_mean"]
 
-See the README for details.
+New users: start with docs/guide.md and the scripts in examples/.
 """
 
 from .builders import (
     SymmetricCoreSurfaceModel,
+    build_eigenmode_steadystatemode_model,
+    build_small_biot_model,
+    build_two_eigenmodes_model,
     eigenmode_steadystate_model,
     literature_model,
     small_biot_model,
@@ -26,6 +29,7 @@ from .builders import (
 from .galerkin import EigenmodeFamily, GalerkinProjection, Mode, steadystate_mode
 from .model import DEFAULT_TOL, CoreSurfaceModel, Solution
 from .parameters import ThermalParameters, kokam_pouch
+from .selection import describe, modal_timescales
 
 __all__ = [
     "CoreSurfaceModel",
@@ -36,6 +40,11 @@ __all__ = [
     "Solution",
     "SymmetricCoreSurfaceModel",
     "ThermalParameters",
+    "build_eigenmode_steadystatemode_model",
+    "build_small_biot_model",
+    "build_two_eigenmodes_model",
+    "describe",
+    "modal_timescales",
     "eigenmode_steadystate_model",
     "kokam_pouch",
     "literature_model",

@@ -24,3 +24,17 @@ def test_symmetric_model_tracks_full_model(h):
         lit_err = np.max(np.abs(lit[state] - truth[state]))
         assert our_err < 0.05 * np.max(truth[state])
         assert our_err < lit_err
+
+
+def test_asymmetric_profile_tracks_full_model():
+    from coresurf.reference import solve_heat_equation
+
+    params = coresurf.kokam_pouch(1000, 30)
+    t = np.linspace(0, 1500, 60)
+    truth = solve_heat_equation(params, Q, t)
+    model = coresurf.eigenmode_steadystate_model(params)
+    soln = model.simulate(Q, t)
+    xs = np.linspace(0, params.L, 9)
+    profile = model.temperature_profile(soln, xs)
+    exact = np.array([truth["Temperature"](t, x) for x in xs])
+    assert np.max(np.abs(profile - exact)) < 0.02 * np.max(exact)

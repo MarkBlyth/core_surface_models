@@ -27,7 +27,8 @@ def main():
         q = common.STANDARD_HEATGEN
         truth = symmetric_core_surface(params, q, ts)
         lit_core, lit_surf = coresurf.literature_model(params).simulate(q, ts)
-        our_core, our_surf = coresurf.symmetric_core_surface_model(params).simulate(q, ts)
+        ours = coresurf.symmetric_core_surface_model(params).simulate(q, ts)
+        our_core, our_surf = ours["T_core"], ours["T_surf"]
 
         ax[0].plot(ts, truth["T_core"], label="Full model", color="k", zorder=1000, linestyle=":")
         ax[2].plot(ts, truth["T_surf"], color="k", zorder=1000, linestyle=":")

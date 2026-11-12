@@ -28,11 +28,22 @@ ModeFunction = Callable[[npt.ArrayLike], npt.ArrayLike]
 @dataclass
 class Mode:
     """
-    A single Galerkin trial function, normalised so mode(0) = 1.
+    A single Galerkin trial function phi(x) on [0, L].
+
+    **Every mode must satisfy phi(0) = 1.** The core-surface
+    transformation relies on this: it is what makes the second state
+    equal to the temperature at x = 0, T_0 = T_amb + a1 phi1(0) + a2 phi2(0)
+    = T_amb + a1 + a2. A mode with phi(0) != 1 is rejected. To rescale a
+    function automatically, build it with `Mode.normalised(...)`.
+
+    Modes must also satisfy the cooling boundary conditions of the cell
+    they are used with, k phi'(0) = h0 phi(0) and -k phi'(L) = hL phi(L);
+    `GalerkinProjection` checks this.
 
     Supply either `second_derivative`, or `eigenvalue_squared` if the
     mode is an eigenfunction of d2/dx2 (in which case
-    second_derivative = -eigenvalue_squared * mode).
+    second_derivative = -eigenvalue_squared * mode). Both functions must
+    accept a NumPy array of positions.
     """
 
     mode: ModeFunction
@@ -40,9 +51,7 @@ class Mode:
     eigenvalue_squared: Optional[float] = None
 
     def __post_init__(self):
-        mode0 = self.mode(0.0)
-        if not np.isclose(mode0, 1.0):
-            raise ValueError(f"mode(0) must equal 1, got {mode0}")
+        check_normalised(self)
         if self.second_derivative is None:
             if self.eigenvalue_squared is None:
                 raise ValueError(
@@ -51,6 +60,78 @@ class Mode:
                 )
             mu2 = self.eigenvalue_squared
             self.second_derivative = lambda x: -mu2 * self.mode(x)
+
+    @classmethod
+    def normalised(
+        cls,
+        mode: ModeFunction,
+        second_derivative: Optional[ModeFunction] = None,
+        eigenvalue_squared: Optional[float] = None,
+    ) -> "Mode":
+        """
+        Build a Mode from any function f(x) with f(0) != 0, by dividing
+        it (and its second derivative) by f(0), so that phi(0) = 1.
+        """
+        scale = float(np.squeeze(mode(0.0)))
+        if not np.isfinite(scale) or np.isclose(scale, 0.0):
+            raise ValueError(
+                f"Cannot normalise a mode with f(0) = {scale}: the "
+                "core-surface form needs a trial function that is non-zero "
+                "at x = 0, so that it can be scaled to phi(0) = 1."
+            )
+        d2 = None if second_derivative is None else (lambda x: second_derivative(x) / scale)
+        return cls(
+            mode=lambda x: mode(x) / scale,
+            second_derivative=d2,
+            eigenvalue_squared=eigenvalue_squared,
+        )
+
+
+def check_normalised(mode: Mode) -> None:
+    """Raise ValueError unless mode.mode(0) == 1."""
+    value = np.squeeze(mode.mode(0.0))
+    if value.size != 1 or not np.isclose(float(value), 1.0):
+        raise ValueError(
+            f"Trial functions must satisfy phi(0) = 1, but phi(0) = {value}. "
+            "The core-surface transformation assumes it, so that the second "
+            "state is the temperature at x = 0. Divide your function and its "
+            "second derivative by their value at x = 0, or use "
+            "Mode.normalised(...)."
+        )
+
+
+def check_boundary_conditions(params: ThermalParameters, mode: Mode, rtol: float = 1e-4) -> None:
+    """
+    Raise ValueError unless the mode satisfies the cooling (Robin)
+    boundary conditions
+
+        k phi'(0) = h0 phi(0),     -k phi'(L) = hL phi(L).
+
+    The Galerkin projection works with phi'' directly, so it is only
+    valid for trial functions that satisfy these. phi' is estimated by
+    finite differences.
+    """
+    L, k = params.L, params.k
+    dx = 1e-5 * L
+    f = lambda x: float(np.squeeze(mode.mode(x)))  # noqa: E731
+    f0, f1, f2 = f(0.0), f(dx), f(2 * dx)
+    g0, g1, g2 = f(L), f(L - dx), f(L - 2 * dx)
+    slope_0 = (-3 * f0 + 4 * f1 - f2) / (2 * dx)
+    slope_L = (3 * g0 - 4 * g1 + g2) / (2 * dx)
+    size = max(abs(f(x)) for x in np.linspace(0, L, 21))
+    errors = {
+        "x = 0": (k * slope_0 - params.h0 * f0) / ((k / L + params.h0) * size),
+        "x = L": (-k * slope_L - params.hL * g0) / ((k / L + params.hL) * size),
+    }
+    bad = [where for where, err in errors.items() if abs(err) > rtol]
+    if bad:
+        raise ValueError(
+            "Trial functions must satisfy the cooling boundary conditions "
+            "k phi'(0) = h0 phi(0) and -k phi'(L) = hL phi(L), but this one "
+            f"does not at {' and '.join(bad)}. The Galerkin projection "
+            "assumes it, and gives wrong results otherwise. The modes from "
+            "EigenmodeFamily and steadystate_mode satisfy them."
+        )
 
 
 class GalerkinProjection:
@@ -67,6 +148,10 @@ class GalerkinProjection:
     """
 
     def __init__(self, params: ThermalParameters, mode1: Mode, mode2: Mode):
+        # Checked again here, in case a mode was modified after creation
+        for mode in (mode1, mode2):
+            check_normalised(mode)
+            check_boundary_conditions(params, mode)
         self.params = params
         self.mode1 = mode1
         self.mode2 = mode2
@@ -118,6 +203,15 @@ class GalerkinProjection:
         m1av = self._average(self.mode1.mode)
         m2av = self._average(self.mode2.mode)
         D = self.params.diffusivity
+        m1_m1, m2_m2 = self._inner(self.mode1.mode, self.mode1.mode), self._inner(
+            self.mode2.mode, self.mode2.mode
+        )
+        if abs(m1av - m2av) <= 1e-9 * max(abs(m1av), abs(m2av)) or c1 <= 1e-12 * m1_m1 * m2_m2:
+            raise ValueError(
+                "The two trial functions must have different volume averages "
+                "(and must not be multiples of each other); otherwise T_mean "
+                "and T_0 cannot be used as states."
+            )
 
         const = -D / (c1 * (m1av - m2av))
         A11 = const * (m1av * (c3 - c2) + m2av * (c6 - c5))
@@ -134,8 +228,30 @@ class GalerkinProjection:
         return A, b
 
     def model(self) -> CoreSurfaceModel:
+        """The core-surface model, with states (T_mean, T_0)."""
         A, b = self.get_model_matrices()
-        return CoreSurfaceModel(A, b, state_names=("T_mean", "T_0"))
+        return CoreSurfaceModel(A, b, state_names=("T_mean", "T_0"), projection=self)
+
+    def temperature_profile(
+        self,
+        x: npt.ArrayLike,
+        T_mean: npt.ArrayLike,
+        T_0: npt.ArrayLike,
+        T_ambient: float = 0.0,
+    ) -> npt.NDArray:
+        """
+        Reconstruct T(x) = T_inf + a1 mode1(x) + a2 mode2(x) from the
+        core-surface states. Returns shape (len(x), len(T_mean)).
+        """
+        m1av = self._average(self.mode1.mode)
+        m2av = self._average(self.mode2.mode)
+        # T_0 - T_inf = a1 + a2 (modes are 1 at x=0); T_mean - T_inf = a1 m1av + a2 m2av
+        rises = np.vstack([np.atleast_1d(T_0), np.atleast_1d(T_mean)]) - T_ambient
+        a1, a2 = np.linalg.solve(np.array([[1.0, 1.0], [m1av, m2av]]), rises)
+        x = np.atleast_1d(np.asarray(x, dtype=float))
+        m1 = np.asarray(self.mode1.mode(x), dtype=float).reshape(-1, 1)
+        m2 = np.asarray(self.mode2.mode(x), dtype=float).reshape(-1, 1)
+        return T_ambient + m1 * a1 + m2 * a2
 
 
 class EigenmodeFamily:
@@ -150,6 +266,10 @@ class EigenmodeFamily:
         if n > len(self._eigenvalues):
             self._eigenvalues = self._solve_eigenvalues(n)
         return self._eigenvalues[:n]
+
+    def timescales(self, n: int) -> npt.NDArray:
+        """Time constants tau_n = 1 / (D mu_n^2) [s] of the first n modes."""
+        return 1 / (self.params.diffusivity * self.eigenvalues(n) ** 2)
 
     def _solve_eigenvalues(self, n_eigenvals: int) -> npt.NDArray:
         """

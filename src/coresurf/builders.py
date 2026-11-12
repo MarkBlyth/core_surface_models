@@ -8,7 +8,7 @@ states represent:
 ====================================  ==========================  ================
 Builder                               States                      Cooling
 ====================================  ==========================  ================
-`symmetric_core_surface_model`        T_core, T_surf              symmetric
+`symmetric_core_surface_model`        T_core, T_surf, T_mean      symmetric
 `eigenmode_steadystate_model`         T_mean, T_0                 any
 `two_eigenmode_model`                 T_mean, T_0                 any
 `small_biot_model`                    T_mean, T_0                 any
@@ -26,7 +26,13 @@ import numpy as np
 import numpy.typing as npt
 
 from .galerkin import EigenmodeFamily, GalerkinProjection, steadystate_mode
-from .model import CoreSurfaceModel, HeatGeneration, Solution, as_heat_function
+from .model import (
+    CoreSurfaceModel,
+    HeatGeneration,
+    Solution,
+    as_heat_function,
+    constant_ambient,
+)
 from .parameters import ThermalParameters
 
 
@@ -55,6 +61,11 @@ def small_biot_model(params: ThermalParameters) -> CoreSurfaceModel:
     """
     h0, hL = params.h0, params.hL
     rho_cp, L, k = params.rho_cp, params.L, params.k
+    if 2 * h0 == hL:
+        raise ValueError(
+            "The small-Biot model is undefined when hL = 2 h0. "
+            "Swap the faces with params.mirrored(), or use a Galerkin model."
+        )
 
     k1 = 3 * hL * (h0 - hL) / (L * (2 * h0 - hL))
     k23 = 2 * (h0**2 - h0 * hL + hL**2) / (L * (2 * h0 - hL))
@@ -101,6 +112,7 @@ class _LiteratureModel(CoreSurfaceModel):
     def rhs(self, heatgen: HeatGeneration, T_ambient: float = 0.0):
         p = self.params
         q = as_heat_function(heatgen)
+        T_ambient = constant_ambient(T_ambient)
         thermal_mass = p.rho_cp * p.L * 0.25
 
         def ode_rhs(t, x):
@@ -125,28 +137,69 @@ class SymmetricCoreSurfaceModel:
 
     core: CoreSurfaceModel
     surface: CoreSurfaceModel
-    state_names: tuple[str, ...] = ("T_core", "T_surf")
+    state_names: tuple[str, ...] = ("T_core", "T_surf", "T_mean")
 
     def simulate(
         self,
         heatgen: HeatGeneration,
         t_eval: npt.ArrayLike,
         T_ambient: float = 0.0,
+        T_initial: float | None = None,
         **solver_kwargs,
     ) -> Solution:
-        """Simulate from ambient; see `CoreSurfaceModel.simulate`."""
-        core = self.core.simulate(heatgen, t_eval, T_ambient, **solver_kwargs)
-        surf = self.surface.simulate(heatgen, t_eval, T_ambient, **solver_kwargs)
-        return Solution(core.t, np.vstack([core["T_0"], surf["T_0"]]), self.state_names)
+        """
+        Simulate from t_eval[0] to t_eval[-1]; see `CoreSurfaceModel.simulate`.
+        The cell starts at a uniform temperature T_initial (default: ambient).
+        """
+        kwargs = dict(T_ambient=T_ambient, T_initial=T_initial, **solver_kwargs)
+        core = self.core.simulate(heatgen, t_eval, **kwargs)
+        surf = self.surface.simulate(heatgen, t_eval, **kwargs)
+        # By symmetry, the mean over the half-domain is the mean over the cell
+        y = np.vstack([core["T_0"], surf["T_0"], core["T_mean"]])
+        return Solution(core.t, y, self.state_names)
+
+    def temperature_profile(
+        self, solution: Solution, x: npt.ArrayLike, T_ambient: float = 0.0
+    ) -> npt.NDArray:
+        """
+        Temperature at positions `x` [m] across the full cell thickness
+        (0 <= x <= L, centre at L/2), at every time in `solution`.
+        Returns shape (len(x), len(solution.t)).
+        """
+        half_L = self.core.projection.params.L
+        distance_from_centre = np.abs(np.atleast_1d(np.asarray(x, dtype=float)) - half_L)
+        return self.core.projection.temperature_profile(
+            distance_from_centre,
+            solution["T_mean"],
+            solution["T_core"],
+            constant_ambient(T_ambient),
+        )
 
 
 def symmetric_core_surface_model(params: ThermalParameters) -> SymmetricCoreSurfaceModel:
     """
-    Recommended core-surface model for a symmetrically cooled cell.
-    `params` describes the full cell, [0, L]. States: (T_core, T_surf).
+    Recommended model for a symmetrically cooled cell (h0 == hL).
+    `params` describes the full cell, [0, L].
+    States: (T_core, T_surf, T_mean) -- centre, surface, and volume-averaged
+    temperature.
     """
     half = params.half_domain()
     return SymmetricCoreSurfaceModel(
         core=eigenmode_steadystate_model(half),
         surface=eigenmode_steadystate_model(half.mirrored()),
     )
+
+
+# ---------------------------------------------------------------------------
+# Names used in the paper's code listings and the original scripts. These
+# behave as before: Galerkin builders return an object with
+# get_model_matrices(), and build_small_biot_model returns (A, b).
+# ---------------------------------------------------------------------------
+
+build_eigenmode_steadystatemode_model = eigenmode_steadystate_model
+build_two_eigenmodes_model = two_eigenmode_model
+
+
+def build_small_biot_model(params: ThermalParameters):
+    """Small-Biot model as an (A, b) tuple, as in the paper's scripts."""
+    return small_biot_model(params).get_model_matrices()

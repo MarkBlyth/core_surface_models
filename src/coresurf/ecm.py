@@ -1,6 +1,14 @@
 """
-Thevenin equivalent-circuit model, used to generate realistic heat
-generation profiles from a current profile. Requires `pandas`.
+Thevenin equivalent-circuit model (ECM), used to generate realistic heat
+generation profiles from a current profile, or to couple with a
+core-surface thermal model (see examples/07_electrothermal_ecm.py).
+Requires `pandas`.
+
+The model and the MLP001 parameter set are from
+
+    M. Blyth, A. Gupta and A. Hales, "How to parameterise an
+    equivalent-circuit empirical battery model from time-domain data",
+    MethodsX (2026), 103865.
 """
 
 from __future__ import annotations
@@ -86,6 +94,18 @@ class TheveninModel:
         return scipy.interpolate.LinearNDInterpolator(
             np.vstack((temps, socs)).T, sort_df[param_header].to_numpy()
         )
+
+    def ocv(self, temperature, soc):
+        """Open-circuit voltage [V] at a temperature [degC] and SOC [-]."""
+        return self._ocv_lut(temperature, soc)
+
+    def resistances(self, temperature, soc) -> npt.NDArray:
+        """[R0, R1, ..., RN] [Ohm]: series resistance, then each RC pair."""
+        return np.array([np.squeeze(r(temperature, soc)) for r in self._r_luts])
+
+    def time_constants(self, temperature, soc) -> npt.NDArray:
+        """[tau1, ..., tauN] [s], the time constant of each RC pair."""
+        return np.array([np.squeeze(tau(temperature, soc)) for tau in self._tau_luts])
 
     def rhs(
         self, currentfunc: Callable[[float], float], temp_inf: float
