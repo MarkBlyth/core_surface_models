@@ -19,6 +19,11 @@ the models do, how to choose one, and how to get started, whether you
 use Spyder, VS Code, or a terminal and your own editor. The
 [examples](examples/) folder has ready-to-run scripts.
 
+## AI usage
+
+The original software implementation was written by me, then Claude Code
+was used to structure the project into a package and improve my documentation.
+
 ## Quick start
 
 No installation is needed to try it: open
