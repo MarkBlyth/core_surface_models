@@ -248,7 +248,9 @@ suggests a model:
   throughout. A large one means a big difference between centre and
   surface. The traditional model gets worse as the Biot number grows.
   The small-Biot model is fine below about 0.5. The {φ₁, Ψ} model works
-  at any Biot number.
+  at any practical Biot number. (Below about 0.0015 its two shapes become
+  numerically indistinguishable; it then stops with a message suggesting
+  the small-Biot model, which is very accurate there.)
 - **Modal timescales** `tau_1, tau_2, tau_3` (seconds). `tau_1` is roughly
   how long the whole cell takes to heat up or cool down. `tau_2` and
   `tau_3` are how quickly the *shape* of the temperature profile settles

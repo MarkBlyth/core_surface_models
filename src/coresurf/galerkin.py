@@ -206,11 +206,20 @@ class GalerkinProjection:
         m1_m1, m2_m2 = self._inner(self.mode1.mode, self.mode1.mode), self._inner(
             self.mode2.mode, self.mode2.mode
         )
-        if abs(m1av - m2av) <= 1e-9 * max(abs(m1av), abs(m2av)) or c1 <= 1e-12 * m1_m1 * m2_m2:
+        # The Gram determinant c1 measures how different the two shapes
+        # are. Below ~1e-15 (relative), round-off in the quadrature swamps
+        # it and the matrices are meaningless. For the built-in modes this
+        # happens at Biot numbers below about 0.0015, where the two shapes
+        # become indistinguishable.
+        if abs(m1av - m2av) <= 1e-12 * max(abs(m1av), abs(m2av)) or c1 <= 1e-15 * m1_m1 * m2_m2:
             raise ValueError(
-                "The two trial functions must have different volume averages "
-                "(and must not be multiples of each other); otherwise T_mean "
-                "and T_0 cannot be used as states."
+                "The two trial functions are too similar to tell apart "
+                "numerically: they must have different volume averages and "
+                "must not be multiples of each other, otherwise T_mean and T_0 "
+                "cannot be used as states. With the built-in modes this "
+                f"happens at very small Biot numbers (here Bi = {self.params.biot:.2g}), "
+                "where the cell is almost uniform in temperature; use "
+                "small_biot_model instead."
             )
 
         const = -D / (c1 * (m1av - m2av))

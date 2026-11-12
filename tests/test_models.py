@@ -197,8 +197,21 @@ def test_normalised_mode_matches_builtin():
 def test_identical_modes_rejected():
     params = coresurf.kokam_pouch(150)
     phi1 = coresurf.EigenmodeFamily(params).mode(1)
-    with pytest.raises(ValueError, match="different volume averages"):
+    with pytest.raises(ValueError, match="too similar"):
         coresurf.GalerkinProjection(params, phi1, phi1).get_model_matrices()
+
+
+def test_small_biot_numbers():
+    # Bi ~ 0.01 still builds an accurate model
+    params = coresurf.ThermalParameters(0.0113, 0.916, 1, 1, 2408, 1030)
+    model = coresurf.eigenmode_steadystate_model(params)
+    small = coresurf.small_biot_model(params)
+    np.testing.assert_allclose(steady_state_of(model, Q), steady_state_of(small, Q), rtol=1e-3)
+    # Far smaller, the two shapes are numerically identical: refuse, and suggest small_biot_model
+    tiny = params.with_cooling(0.01)
+    with pytest.raises(ValueError, match="small_biot_model"):
+        coresurf.eigenmode_steadystate_model(tiny)
+    coresurf.small_biot_model(tiny)  # still available
 
 
 @pytest.mark.parametrize(
