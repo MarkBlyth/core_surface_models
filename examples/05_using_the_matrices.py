@@ -61,7 +61,8 @@ print("Steady state [T_mean, T_0] [degC]:", steady)
 # Write the equations as a function f(t, x) that returns dx/dt, and give
 # it to an ODE solver. This is all model.simulate does; writing it out
 # yourself is useful when the thermal model is part of a larger model
-# (see Example 7, which couples it to an electrical model).
+# (see Example 0 for the minimal recipe, Example 8 for a module of
+# several cells, and Example 7 for coupling to an electrical model).
 
 
 def heat_generation(t):
